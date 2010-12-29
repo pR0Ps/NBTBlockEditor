@@ -42,6 +42,7 @@ public class NBTBlockEditor extends JFrame{
 	private File currentIDFile = null;
 	private File currentDataFile = null;
 
+	//schematic data
 	private Point3D size;
 	private Block[] blockData;
 
@@ -213,23 +214,23 @@ public class NBTBlockEditor extends JFrame{
 
 	//GUI for opening a file
 	public void openFile(){
-		if (JOptionPane.showConfirmDialog(editor, "You will need to select 2 files.\n1) Block IDs file\n2) Block data file", "Choosing files", JOptionPane.OK_CANCEL_OPTION) == JOptionPane.CANCEL_OPTION){
-			addToLog ("\nOpen files cancelled by user");
-			return;
-		}
+		//if (JOptionPane.showConfirmDialog(editor, "You will need to select 2 files.\n1) Block IDs file\n2) Block data file", "Choosing files", JOptionPane.OK_CANCEL_OPTION) == JOptionPane.CANCEL_OPTION){
+		//	addToLog ("\nOpen files cancelled by user");
+		//	return;
+		//}
 		addToLog ("\nFile chooser opened");
 		
 		JFileChooser idChooser = new JFileChooser();
 		idChooser.setDialogTitle("Choose the BlockID file");
-		JFileChooser dataChooser = new JFileChooser();
-		dataChooser.setDialogTitle("Choose the Block data file");
+		//JFileChooser dataChooser = new JFileChooser();
+		//dataChooser.setDialogTitle("Choose the Block data file");
 		
-		if(idChooser.showOpenDialog(editor) == JFileChooser.APPROVE_OPTION && dataChooser.showOpenDialog(editor) == JFileChooser.APPROVE_OPTION) {
+		if(idChooser.showOpenDialog(editor) == JFileChooser.APPROVE_OPTION){ //&& dataChooser.showOpenDialog(editor) == JFileChooser.APPROVE_OPTION) {
 			currentIDFile = idChooser.getSelectedFile();
 			addToLog("\nFile '" + currentIDFile + "' picked (and is the current blockID file)");
-			currentDataFile = dataChooser.getSelectedFile();
-			addToLog("\nFile '" + currentDataFile + "' picked (and is the current block data file)");
-			loadData(currentIDFile, currentDataFile);
+			//currentDataFile = dataChooser.getSelectedFile();
+			//addToLog("\nFile '" + currentDataFile + "' picked (and is the current block data file)");
+			loadData(currentIDFile, null);//currentDataFile);
 		}
 		else{
 			JOptionPane.showMessageDialog(editor, "No file loaded", "Exiting", JOptionPane.INFORMATION_MESSAGE);
