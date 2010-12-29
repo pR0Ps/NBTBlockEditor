@@ -9,11 +9,11 @@ import java.awt.event.KeyListener;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseListener;
 import java.awt.image.BufferedImage;
-import java.io.BufferedInputStream;
-import java.io.DataInputStream;
+import java.io.EOFException;
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.IOException;
+import java.util.Iterator;
+import java.util.Map;
 
 import javax.swing.JFileChooser;
 import javax.swing.JFrame;
@@ -28,8 +28,10 @@ import javax.swing.JTabbedPane;
 import javax.swing.JTextArea;
 import javax.swing.UIManager;
 
+import org.jnbt.*;
 
-@SuppressWarnings("all")
+
+@SuppressWarnings("serial")
 public class NBTBlockEditor extends JFrame{
 
 	public static final int TILE_SIZE = 16;
@@ -39,14 +41,12 @@ public class NBTBlockEditor extends JFrame{
 	public static final char DOWN = 'z';
 	public static final char BLOCK = 'b';
 
-	private File currentIDFile = null;
-	private File currentDataFile = null;
+	private File currentFile = null;
 
 	//schematic data
 	private Point3D size;
 	private Block[] blockData;
 
-	private boolean IORunning = false;
 	private boolean objectLoaded = false;
 	private int curLevel = 0;
 	private String selectedBrush = "0";
@@ -84,9 +84,9 @@ public class NBTBlockEditor extends JFrame{
 		//set up UI
 		tabs = new JTabbedPane(JTabbedPane.TOP, JTabbedPane.WRAP_TAB_LAYOUT);
 		JPanel mainTab = new JPanel(new BorderLayout());
-		
+
 		tabs.addKeyListener(new KeyPress());
-		
+
 		editorScrollPane = new JScrollPane(editPanel, JScrollPane.VERTICAL_SCROLLBAR_ALWAYS, JScrollPane.HORIZONTAL_SCROLLBAR_ALWAYS);
 		mainTab.add(editorScrollPane, BorderLayout.CENTER);
 		//TODO: add UI to main panel
@@ -188,77 +188,125 @@ public class NBTBlockEditor extends JFrame{
 
 	//GUI for closing the current file
 	public void closeFile(){
-		int temp = JOptionPane.showConfirmDialog(editor, "Save before closing file?", "Save?", JOptionPane.YES_NO_CANCEL_OPTION);
-		if (temp == JOptionPane.YES_OPTION){
-			addToLog ("\nClosing without saving");
-			close();
-		}
-		else if (temp == JOptionPane.NO_OPTION){
-			addToLog ("\nClosing with saving");
-			saveFileAs();
-			close();
-		}
-		else if (temp == JOptionPane.CANCEL_OPTION){
-			addToLog ("\nClose file cancelled");
+		if (objectLoaded){
+			int temp = JOptionPane.showConfirmDialog(editor, "Save before closing file?", "Save?", JOptionPane.YES_NO_CANCEL_OPTION);
+			if (temp == JOptionPane.YES_OPTION){
+				addToLog ("\nClosing without saving");
+				close();
+			}
+			else if (temp == JOptionPane.NO_OPTION){
+				addToLog ("\nClosing with saving");
+				saveFileAs();
+				close();
+			}
+			else if (temp == JOptionPane.CANCEL_OPTION){
+				addToLog ("\nClose file cancelled");
+			}
 		}
 	}
 
 	//closes the current file
 	private void close(){
-		blockData = null;
-		size = null;
 		objectLoaded = false;
-		editPanel.repaint();
+		editorScrollPane.repaint();
 		addToLog("\nFile closed");
 	}
 
 	//GUI for opening a file
 	public void openFile(){
-		//if (JOptionPane.showConfirmDialog(editor, "You will need to select 2 files.\n1) Block IDs file\n2) Block data file", "Choosing files", JOptionPane.OK_CANCEL_OPTION) == JOptionPane.CANCEL_OPTION){
-		//	addToLog ("\nOpen files cancelled by user");
-		//	return;
-		//}
 		addToLog ("\nFile chooser opened");
-		
+
 		JFileChooser idChooser = new JFileChooser();
-		idChooser.setDialogTitle("Choose the BlockID file");
-		//JFileChooser dataChooser = new JFileChooser();
-		//dataChooser.setDialogTitle("Choose the Block data file");
-		
-		if(idChooser.showOpenDialog(editor) == JFileChooser.APPROVE_OPTION){ //&& dataChooser.showOpenDialog(editor) == JFileChooser.APPROVE_OPTION) {
-			currentIDFile = idChooser.getSelectedFile();
-			addToLog("\nFile '" + currentIDFile + "' picked (and is the current blockID file)");
-			//currentDataFile = dataChooser.getSelectedFile();
-			//addToLog("\nFile '" + currentDataFile + "' picked (and is the current block data file)");
-			loadData(currentIDFile, null);//currentDataFile);
+		idChooser.setDialogTitle("Choose the schematic file");
+
+		if(idChooser.showOpenDialog(editor) == JFileChooser.APPROVE_OPTION){
+			currentFile = idChooser.getSelectedFile();
+			addToLog("\nFile '" + currentFile + "' picked (and is the current blockID file)");
+			if (!loadData(currentFile)){
+				currentFile = null;
+				JOptionPane.showMessageDialog(editor, "There was an error reading the file", "No file loaded", JOptionPane.ERROR_MESSAGE);
+			}
 		}
 		else{
-			JOptionPane.showMessageDialog(editor, "No file loaded", "Exiting", JOptionPane.INFORMATION_MESSAGE);
+			JOptionPane.showMessageDialog(editor, "No file loaded", "Cancelled", JOptionPane.INFORMATION_MESSAGE);
 			addToLog ("\nNo file loaded (cancelled by user)");
 		}
 		editPanel.newObjectLoaded();
 	}
 
 	//loads the data from the given file into the program
-	private void loadData (File block_id, File data){
-		DataInputStream din;		
-		try{
-			BufferedInputStream in = new BufferedInputStream(new FileInputStream(block_id.getAbsolutePath()));
+	private boolean loadData (File f){
+		addToLog("\nGZiped File size is " + f.length() + " bytes\nLoading...");
 
-			blockData = new Block[(int) block_id.length()];
-			addToLog("\nFile size is " + block_id.length() + " bytes\nLoading...");
-			for (int i = 0 ; i < block_id.length() ; i++){
-				blockData[i] = new Block(BlockData.toHex(in.read()));
+		Map <String, Tag> schematicMap;
+		byte[] data = {0};
+		byte[] blocks = {0};
+
+		try{
+			NBTInputStream in = new NBTInputStream(new FileInputStream(f));
+			Tag temp;
+			//read and discard anything until the schematic tag
+			try{
+				while (true){
+					temp = in.readTag();
+					addToLog("aaaaa" + temp.toString());
+					if (temp instanceof CompoundTag && temp.getName().equalsIgnoreCase("schematic")){
+						schematicMap = (Map<String, Tag>) ((CompoundTag)temp).getValue();
+						break;
+					}
+				}
 			}
-			in.close();
-			size = getDimensions();
+			catch (EOFException e){
+				//End of file before hitting schematic tag
+				addToLog("\nError: No 'Schematic' tag found");
+				addToLog ("\nInvalid file");
+				return false;
+			}
+			catch (Exception e){
+				addToLog ("\nInvalid file");
+				return false;
+			}
+			finally{
+				in.close();
+			}
+
+			//assign values
+			try{
+				size = new Point3D();
+				size.setZ((Short)schematicMap.get("Height").getValue());
+				size.setX((Short)schematicMap.get("Width").getValue());
+				size.setY((Short)schematicMap.get("Length").getValue());
+				data = (byte[])schematicMap.get("Data").getValue();
+				blocks = (byte[])schematicMap.get("Blocks").getValue();
+			}
+			catch (Exception e){
+				addToLog("\nInvalid file: Needed components missing/improperly named");
+				return false;
+			}
+
+
+			if (size.getX() * size.getY() * size.getZ() != data.length){
+				addToLog("\nInvalid file: Dimensions do not match block data");
+				return false;
+			}
+			else if (data.length != blocks.length){
+				addToLog("\nInvalid file: blocks and block data size do not match (" + data.length +" vs " + blocks.length + " bytes)");
+				return false;
+			}
+			addToLog("Data from file loaded, organizing...");
+			blockData = new Block[data.length];
+			for (int i = 0 ; i < data.length ; i++){
+				blockData[i] = new Block(BlockData.toHex(blocks[i]), BlockData.toHex(data[i]));
+			}
 			objectLoaded = true;
-			addToLog ("File loaded");
+			addToLog ("File loaded!");
+			return true;
 		}
 		catch (Exception e){
 			e.printStackTrace();
 			addToLog("\nError: " + e.getMessage());
-			currentIDFile = null;
+			addToLog ("\nFile not loaded");
+			return false;
 		}
 	}
 
@@ -269,9 +317,9 @@ public class NBTBlockEditor extends JFrame{
 
 	//saves the current file
 	public void saveFile(){
-		if (objectLoaded && currentIDFile != null){
+		if (objectLoaded && currentFile != null){
 			addToLog("\nSaving file...");
-			writeData (currentIDFile);
+			writeData (currentFile);
 		}
 		else{
 			addToLog("\nNo file loaded, cannot save");
@@ -280,35 +328,29 @@ public class NBTBlockEditor extends JFrame{
 
 	//GUI for choosing a file to save as
 	public void saveFileAs(){
-		//currentFile = ??
+		//currentFile set to picked file
 		//TODO: Save file as
-	}
-
-	//GUI for entering the dimensions of the object
-	public Point3D getDimensions(){
-		//TODO: Window to pick dimensions of map, check and confirm if x*y*z != blockData.length
-		return new Point3D(25, 25, 123);
 	}
 
 	//GUI for picking the block type to place
 	public String chooseBrush(){
-		//TODO: Choose block menu
-		//JDialog
+		//TODO: Choose block menu (use JDialog)
 		return "2";
 	}
 
 	//translates a coordinate to its array index
 	private int getIndex (int x, int y, int z){
 		if (size != null){
-			return z * size.getX()* size.getY() + y * size.getX() + x;
+			return z * size.getX() * size.getY() + y * size.getX() + x;
 		}
 		return -1;
 	}
 
 	//adds text to the debug log
 	private void addToLog (String s){
-		logTextArea.append(s);
-		logTextArea.setCaretPosition(logTextArea.getDocument().getLength());
+		System.out.println (s);
+		//logTextArea.append(s);
+		//logTextArea.setCaretPosition(logTextArea.getDocument().getLength());
 	}
 
 
@@ -335,7 +377,7 @@ public class NBTBlockEditor extends JFrame{
 			}
 		}
 	}
-	
+
 	//handles all the graphics
 	private class EditPanel extends JPanel{
 		private BufferedImage background = null;
@@ -382,17 +424,10 @@ public class NBTBlockEditor extends JFrame{
 			}
 		}
 
-		//draws the background + grid lines
+		//draws the background
 		private void drawBG (Graphics g){
 			g.setColor(Color.WHITE);
 			g.fillRect(0, 0, x_size, y_size);
-//			g.setColor(Color.BLACK);
-//			for (int x = 0 ; x < size.getX() + 1 ; x++){
-//				g.drawLine(0, x * (TILE_SIZE + 1), size.getZ() * (TILE_SIZE + 1), size.getX() * (TILE_SIZE + 1));
-//			}
-//			for (int z = 0 ; z < size.getZ() + 1 ; z++){
-//				g.drawLine(z * (TILE_SIZE + 1), 0, z * (TILE_SIZE + 1), size.getX() * (TILE_SIZE + 1));
-//			}
 		}
 
 		private void drawBlocks (Graphics g){
@@ -404,7 +439,7 @@ public class NBTBlockEditor extends JFrame{
 		}
 
 		public void paintComponent(Graphics g){
-			editorScrollPane.validate();
+			//editorScrollPane.validate();
 			if (objectLoaded){
 				g.drawImage(background, 0, 0, null);
 				drawBlocks(g);
